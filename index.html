@@ -507,8 +507,8 @@
 ═══════════════════════════════════════════════════════════ */
 /* password obfuscated */
 
-/* ── ExtendsClass config ───────────────────────────────── */
-const _EC_URL = "https://json.extendsclass.com/bin/229c79423274";
+/* ── Firebase Firestore config ─────────────────────────── */
+const _FB = "https://firestore.googleapis.com/v1/projects/quiz-marine/databases/(default)/documents/resultats";
 
 /* ═══════════════════════════════════════════════════════════
    QUESTIONS
@@ -536,29 +536,36 @@ function shuffle(arr) {
 
 async function _gsr() {
   try {
-    const r = await fetch(_EC_URL + '?t=' + Date.now());
+    const r = await fetch(_FB + '?pageSize=200');
     const j = await r.json();
-    return Array.isArray(j) ? j : [];
+    if (!j.documents) return [];
+    return j.documents.map(doc => {
+      const f = doc.fields;
+      return {
+        date:        f.date?.stringValue        || '',
+        matricule:   f.matricule?.stringValue   || '',
+        nom:         f.nom?.stringValue         || '',
+        score:       f.score?.stringValue       || '',
+        pourcentage: f.pourcentage?.stringValue || ''
+      };
+    });
   } catch { return []; }
 }
 
 async function _sv(result) {
-  // Délai aléatoire pour réduire les collisions simultanées
-  await new Promise(res => setTimeout(res, Math.random() * 2000));
-  for (let i = 0; i < 5; i++) {
-    try {
-      const arr = await _gsr();
-      arr.push(result);
-      const r = await fetch(_EC_URL, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(arr)
-      });
-      if (r.ok) return;
-    } catch {}
-    await new Promise(res => setTimeout(res, 500 + Math.random() * 1000));
-  }
-  throw new Error('Sauvegarde échouée après plusieurs tentatives');
+  await fetch(_FB, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fields: {
+        date:        { stringValue: result.date },
+        matricule:   { stringValue: result.matricule },
+        nom:         { stringValue: result.nom },
+        score:       { stringValue: result.score },
+        pourcentage: { stringValue: result.pourcentage }
+      }
+    })
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -730,11 +737,14 @@ async function exportCSV() {
 async function clearResults() {
   if (!confirm('Effacer tous les résultats enregistrés ? Cette action est irréversible.')) return;
   try {
-    await fetch(_EC_URL, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify([])
-    });
+    // Supprimer tous les documents Firestore
+    const r = await fetch(_FB + '?pageSize=200');
+    const j = await r.json();
+    if (j.documents) {
+      await Promise.all(j.documents.map(doc =>
+        fetch('https://firestore.googleapis.com/v1/' + doc.name, { method: 'DELETE' })
+      ));
+    }
     renderAdminTable();
   } catch(e) { alert('Erreur lors de la suppression.'); }
 }
